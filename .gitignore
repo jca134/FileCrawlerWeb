@@ -1,3 +1,5 @@
-/.venv/
-/credentials.json
+# User-specific Google authorization
 /token.json
+
+# Environment
+/.venv/
