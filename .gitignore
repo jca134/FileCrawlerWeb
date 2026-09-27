@@ -3,3 +3,16 @@
 
 # Environment
 /.venv/
+
+# Desktop OAuth client configuration (shared out-of-band)
+/credentials.json
+
+# Python
+__pycache__/
+
+# Vercel
+/.vercel/
+/.env*
+
+# Editor
+/.idea/

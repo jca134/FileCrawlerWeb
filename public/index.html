@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileCrawler</title>
+  <style>
+    :root {
+      --bg: #f7f7f5; --card: #fff; --text: #1c1c1a; --muted: #6b6b66; --line: #e4e4df;
+      --accent: #2f5bd3; --red: #c8352b; --yellow: #b07d00; --green: #2a8a4a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161615; --card: #1f1f1d; --text: #ececea; --muted: #9a9a94; --line: #33332f;
+        --accent: #7c9cf5; --red: #f0766c; --yellow: #e0b341; --green: #5cc27f;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 16px; }
+    h1 { margin: 0 0 4px; font-size: 28px; }
+    .lede { margin: 0 0 32px; color: var(--muted); }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px;
+    }
+    form { display: flex; gap: 8px; flex-wrap: wrap; }
+    input {
+      flex: 1 1 320px; min-width: 0; padding: 10px 12px; font: inherit; color: inherit;
+      background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    }
+    button, .btn {
+      padding: 10px 16px; font: inherit; font-weight: 600; color: #fff; background: var(--accent);
+      border: 0; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block;
+    }
+    button:disabled { opacity: .6; cursor: default; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .link { color: var(--muted); font-size: 13px; }
+    .status { margin: 16px 0 0; color: var(--muted); }
+    .error { color: var(--red); }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 24px 0 16px; }
+    .stat { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+    .stat b { display: block; font-size: 24px; }
+    .stat span { color: var(--muted); font-size: 13px; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { padding: 12px 0; border-top: 1px solid var(--line); }
+    .file { display: flex; gap: 10px; align-items: baseline; }
+    .file a { color: var(--text); font-weight: 600; word-break: break-word; }
+    .meta { color: var(--muted); font-size: 13px; margin-top: 2px; word-break: break-word; }
+    .badge {
+      flex: none; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor;
+    }
+    .RED { color: var(--red); } .YELLOW { color: var(--yellow); } .GREEN { color: var(--green); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>FileCrawler</h1>
+  <p class="lede">See who can access the files in a Google Drive folder. Files are flagged
+    <span class="RED">public</span>, <span class="YELLOW">shared</span>, or
+    <span class="GREEN">private</span>.</p>
+
+  <section class="card" id="signed-out" hidden>
+    <div class="row">
+      <span>Sign in to scan a folder. FileCrawler only reads file metadata.</span>
+      <a class="btn" href="/auth/login">Sign in with Google</a>
+    </div>
+  </section>
+
+  <section class="card" id="signed-in" hidden>
+    <form id="scan-form">
+      <input id="folder-url" type="url" required
+             placeholder="https://drive.google.com/drive/folders/FOLDER_ID">
+      <button id="scan-btn">Scan</button>
+    </form>
+    <div class="row" style="margin-top:12px">
+      <span class="link">Scans the files directly inside the folder.</span>
+      <a class="link" href="/auth/logout">Sign out</a>
+    </div>
+  </section>
+
+  <p class="status" id="status"></p>
+
+  <section id="results" hidden>
+    <div class="summary">
+      <div class="stat"><b class="RED" id="count-RED">0</b><span>Public</span></div>
+      <div class="stat"><b class="YELLOW" id="count-YELLOW">0</b><span>Restricted sharing</span></div>
+      <div class="stat"><b class="GREEN" id="count-GREEN">0</b><span>Private</span></div>
+    </div>
+    <ul id="file-list"></ul>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const RISK_ORDER = { RED: 0, YELLOW: 1, GREEN: 2 };
+
+  function el(tag, props = {}, children = []) {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...children);
+    return node;
+  }
+
+  function describe(p) {
+    const who = p.emailAddress || p.domain || (p.type === "anyone" ? "Anyone with the link" : p.type);
+    return `${who} (${p.role})`;
+  }
+
+  function render(files) {
+    files.sort((a, b) => RISK_ORDER[a.risk] - RISK_ORDER[b.risk] || a.name.localeCompare(b.name));
+    for (const risk of Object.keys(RISK_ORDER)) {
+      $(`count-${risk}`).textContent = files.filter((f) => f.risk === risk).length;
+    }
+    $("file-list").replaceChildren(...files.map((f) => el("li", {}, [
+      el("div", { className: "file" }, [
+        el("span", { className: `badge ${f.risk}`, textContent: f.risk }),
+        el("a", { href: f.link || "#", target: "_blank", rel: "noopener", textContent: f.name }),
+      ]),
+      el("div", { className: "meta", textContent: `Owner: ${f.owner || "unknown"}` }),
+      el("div", { className: "meta", textContent: `Access: ${f.permissions.map(describe).join(", ") || "none listed"}` }),
+    ])));
+    $("results").hidden = false;
+  }
+
+  function setStatus(text, isError = false) {
+    $("status").textContent = text;
+    $("status").className = isError ? "status error" : "status";
+  }
+
+  $("scan-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("scan-btn").disabled = true;
+    $("results").hidden = true;
+    setStatus("Scanning…");
+    try {
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folder_url: $("folder-url").value }),
+      });
+      const data = await res.json();
+      if (res.status === 401) return init(data.detail);
+      if (!res.ok) throw new Error(data.detail || "Scan failed");
+      setStatus(data.length ? "" : "No files found in that folder.");
+      render(data);
+    } catch (err) {
+      setStatus(err.message, true);
+    } finally {
+      $("scan-btn").disabled = false;
+    }
+  });
+
+  async function init(message = "") {
+    const { signed_in } = await fetch("/api/me").then((r) => r.json());
+    $("signed-in").hidden = !signed_in;
+    $("signed-out").hidden = signed_in;
+    setStatus(message, Boolean(message));
+  }
+
+  init();
+</script>
+</body>
+</html>

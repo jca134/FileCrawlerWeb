@@ -43,10 +43,11 @@ def classify_file_risk(permissions):
     return "YELLOW" if is_shared else "GREEN"
 
 
-def scan_folder(folder_url):
+def scan_folder(folder_url, creds=None):
     folder_id = get_folder_id(folder_url)
 
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if creds is None:
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
     drive = build("drive", "v3", credentials=creds)
 
     response = drive.files().list(
